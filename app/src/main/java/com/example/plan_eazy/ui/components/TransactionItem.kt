@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.plan_eazy.data.model.Constants
 import com.example.plan_eazy.data.model.Transaction
 import com.example.plan_eazy.data.model.TransactionType
 import java.text.SimpleDateFormat
@@ -69,11 +70,23 @@ fun TransactionItem(
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
-                Text(
-                    text = transaction.category,
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = transaction.subCategory ?: transaction.category,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    transaction.units?.let {
+                        val unitLabel = Constants.UNIT_MAPPING[transaction.subCategory] ?: "units"
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "• $it $unitLabel",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
             }
 
             Column(horizontalAlignment = Alignment.End) {

@@ -21,6 +21,7 @@ import com.example.plan_eazy.ui.components.TransactionItem
 import com.example.plan_eazy.ui.viewmodel.TransactionViewModel
 import com.example.plan_eazy.data.model.Goal
 import com.example.plan_eazy.ui.navigation.Screen
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +86,15 @@ fun HomeScreen(viewModel: TransactionViewModel, navController: NavController) {
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 18.sp
                             )
-                            TextButton(onClick = { navController.navigate(Screen.Goals.route) }) {
+                            TextButton(onClick = { 
+                                navController.navigate(Screen.Goals.route) {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }) {
                                 Text("See All")
                                 Icon(Icons.Default.ChevronRight, contentDescription = null)
                             }
@@ -161,7 +170,7 @@ fun BalanceCard(balance: Double) {
         ) {
             Text("Current Balance", style = MaterialTheme.typography.titleMedium)
             Text(
-                "KES ${String.format("%.2f", balance)}",
+                "KES ${String.format(Locale.getDefault(), "%.2f", balance)}",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -181,7 +190,7 @@ fun SummaryCard(title: String, amount: Double, color: Color, modifier: Modifier 
         ) {
             Text(title, style = MaterialTheme.typography.labelMedium, color = color)
             Text(
-                "KES ${String.format("%.0f", amount)}",
+                "KES ${String.format(Locale.getDefault(), "%.0f", amount)}",
                 fontWeight = FontWeight.Bold,
                 color = color,
                 fontSize = 14.sp

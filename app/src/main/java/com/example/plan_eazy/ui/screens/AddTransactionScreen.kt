@@ -23,11 +23,14 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
     var title by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var selectedCategory by remember { mutableStateOf("") }
+    var selectedSubCategory by remember { mutableStateOf("General") }
+    var customCategoryName by remember { mutableStateOf("") }
     var selectedPaymentType by remember { mutableStateOf(Constants.PAYMENT_METHOD_TYPES[0]) }
     var paymentProvider by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var selectedGoalId by remember { mutableStateOf<Long?>(null) }
     var goalsExpanded by remember { mutableStateOf(false) }
+    var units by remember { mutableStateOf("") }
 
     val goals by viewModel.allGoals.collectAsState()
 
@@ -41,6 +44,12 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
         if (selectedCategory.isEmpty() || !categories.contains(selectedCategory)) {
             selectedCategory = categories[0]
         }
+    }
+
+    LaunchedEffect(selectedCategory) {
+        val subs = Constants.SUB_CATEGORIES[selectedCategory]
+        selectedSubCategory = subs?.firstOrNull() ?: "General"
+        units = "" // Reset units when category changes
     }
 
     Scaffold(
@@ -76,7 +85,11 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
 
             OutlinedTextField(
                 value = amount,
-                onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) amount = it },
+                onValueChange = { input ->
+                    if (input.isEmpty() || (input.all { char -> char.isDigit() || char == '.' } && input.count { it == '.' } <= 1)) {
+                        amount = input
+                    }
+                },
                 label = { Text("Amount") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -85,7 +98,7 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title / Source") },
+                label = { Text("Title / Source (e.g., Monthly Rent)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -96,6 +109,46 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                 selectedCategory = selectedCategory,
                 onCategorySelected = { selectedCategory = it }
             )
+
+            // DYNAMIC SUB-CATEGORY SELECTOR
+            val subCategories = Constants.SUB_CATEGORIES[selectedCategory]
+            if (subCategories != null) {
+                Text("Sub-category", style = MaterialTheme.typography.labelLarge)
+                CategoryDropdown(
+                    categories = subCategories,
+                    selectedCategory = selectedSubCategory,
+                    onCategorySelected = { selectedSubCategory = it }
+                )
+            }
+
+            // DYNAMIC UNITS FIELD BASED ON SUB-CATEGORY
+            val unitLabel = Constants.UNIT_MAPPING[selectedSubCategory]
+            if (unitLabel != null) {
+                OutlinedTextField(
+                    value = units,
+                    onValueChange = { input ->
+                        if (input.isEmpty() || (input.all { char -> char.isDigit() || char == '.' } && input.count { it == '.' } <= 1)) {
+                            units = input
+                        }
+                    },
+                    label = { Text("Units used ($unitLabel)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("e.g., 12.5") }
+                )
+            }
+
+            // SHOW CUSTOM CATEGORY FIELD IF "CUSTOM" OR "OTHER" IS SELECTED
+            if (selectedCategory == "Custom" || selectedCategory == "Other") {
+                OutlinedTextField(
+                    value = customCategoryName,
+                    onValueChange = { customCategoryName = it },
+                    label = { Text("Enter Category Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text("e.g., Crypto, Charity, Side Hustle") }
+                )
+            }
 
             Text("Payment Method Type", style = MaterialTheme.typography.labelLarge)
             CategoryDropdown(
@@ -119,11 +172,11 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                     onExpandedChange = { goalsExpanded = !goalsExpanded }
                 ) {
                     OutlinedTextField(
-                        value = goals.find { it.id == selectedGoalId }?.title ?: "Select a goal",
+                        value = goals.find { it.id == selectedGoalId }?.title ?: "No goal linked",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = goalsExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryEditable, true).fillMaxWidth()
                     )
                     ExposedDropdownMenu(
                         expanded = goalsExpanded,
@@ -159,25 +212,34 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
 
             Button(
                 onClick = {
-                    if (amount.isNotEmpty() && title.isNotEmpty()) {
+                    val amountVal = amount.toDoubleOrNull()
+                    if (amountVal != null && title.isNotEmpty()) {
+                        val finalCategory = if ((selectedCategory == "Custom" || selectedCategory == "Other") && customCategoryName.isNotEmpty()) {
+                            customCategoryName
+                        } else {
+                            selectedCategory
+                        }
+
                         viewModel.addTransaction(
                             Transaction(
-                                amount = amount.toDoubleOrNull() ?: 0.0,
+                                amount = amountVal,
                                 title = title,
                                 date = System.currentTimeMillis(),
-                                category = selectedCategory,
+                                category = finalCategory,
+                                subCategory = if (selectedSubCategory == "General") null else selectedSubCategory,
                                 paymentMethodType = selectedPaymentType,
                                 paymentMethodProvider = paymentProvider.ifEmpty { "Other" },
                                 note = note,
                                 type = selectedType,
-                                goalId = selectedGoalId
+                                goalId = selectedGoalId,
+                                units = units.toDoubleOrNull()
                             )
                         )
                         navController.popBackStack()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = amount.isNotEmpty() && title.isNotEmpty()
+                enabled = amount.isNotEmpty() && title.isNotEmpty() && amount.toDoubleOrNull() != null
             ) {
                 Text("Save Transaction")
             }
@@ -203,7 +265,7 @@ fun CategoryDropdown(
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.menuAnchor().fillMaxWidth(),
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
             colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
         )
         ExposedDropdownMenu(

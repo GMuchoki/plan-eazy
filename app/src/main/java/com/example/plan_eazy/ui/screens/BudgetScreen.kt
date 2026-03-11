@@ -17,6 +17,8 @@ import com.example.plan_eazy.data.model.Budget
 import com.example.plan_eazy.data.model.Constants
 import com.example.plan_eazy.data.model.TransactionType
 import com.example.plan_eazy.ui.viewmodel.TransactionViewModel
+import java.util.Calendar
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -56,7 +58,11 @@ fun BudgetScreen(viewModel: TransactionViewModel) {
             } else {
                 items(budgets) { budget ->
                     val spent = allTransactions
-                        .filter { it.type == TransactionType.EXPENSE && it.category == budget.category }
+                        .filter { 
+                            it.type == TransactionType.EXPENSE && 
+                            it.category == budget.category &&
+                            (budget.subCategory == null || it.subCategory == budget.subCategory)
+                        }
                         .sumOf { it.amount }
                     
                     BudgetCard(budget, spent, onDelete = { viewModel.deleteBudget(budget) })
@@ -92,7 +98,12 @@ fun BudgetCard(budget: Budget, spent: Double, onDelete: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(budget.category, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Column {
+                    Text(budget.category, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    budget.subCategory?.let {
+                        Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
                 }
@@ -110,17 +121,21 @@ fun BudgetCard(budget: Budget, spent: Double, onDelete: () -> Unit) {
             
             Spacer(modifier = Modifier.height(8.dp))
             
+            val spentFormatted = String.format(Locale.getDefault(), "%.0f", spent)
+            val budgetFormatted = String.format(Locale.getDefault(), "%.0f", budget.amount)
+            
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Spent: KES ${String.format("%.0f", spent)}", fontSize = 12.sp)
-                Text("Budget: KES ${String.format("%.0f", budget.amount)}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("Spent: KES $spentFormatted", fontSize = 12.sp)
+                Text("Budget: KES $budgetFormatted", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             
             if (isOverBudget) {
+                val overFormatted = String.format(Locale.getDefault(), "%.2f", spent - budget.amount)
                 Text(
-                    "Over budget by KES ${String.format("%.2f", spent - budget.amount)}",
+                    "Over budget by KES $overFormatted",
                     color = MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
@@ -136,20 +151,42 @@ fun BudgetCard(budget: Budget, spent: Double, onDelete: () -> Unit) {
 fun AddBudgetDialog(onDismiss: () -> Unit, onConfirm: (Budget) -> Unit) {
     var amount by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(Constants.EXPENSE_CATEGORIES[0]) }
+    var selectedSubCategory by remember { mutableStateOf("General") }
+
+    val subCategories = Constants.SUB_CATEGORIES[selectedCategory]
+
+    LaunchedEffect(selectedCategory) {
+        selectedSubCategory = Constants.SUB_CATEGORIES[selectedCategory]?.firstOrNull() ?: "General"
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Set Monthly Budget") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Main Category", style = MaterialTheme.typography.labelLarge)
                 CategoryDropdown(
                     categories = Constants.EXPENSE_CATEGORIES,
                     selectedCategory = selectedCategory,
                     onCategorySelected = { selectedCategory = it }
                 )
+
+                if (subCategories != null) {
+                    Text("Sub-category", style = MaterialTheme.typography.labelLarge)
+                    CategoryDropdown(
+                        categories = listOf("General") + subCategories,
+                        selectedCategory = selectedSubCategory,
+                        onCategorySelected = { selectedSubCategory = it }
+                    )
+                }
+
                 OutlinedTextField(
                     value = amount,
-                    onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) amount = it },
+                    onValueChange = { input ->
+                        if (input.isEmpty() || (input.all { char -> char.isDigit() || char == '.' } && input.count { it == '.' } <= 1)) {
+                            amount = input
+                        }
+                    },
                     label = { Text("Monthly Limit (KES)") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -158,16 +195,19 @@ fun AddBudgetDialog(onDismiss: () -> Unit, onConfirm: (Budget) -> Unit) {
         confirmButton = {
             Button(
                 onClick = {
-                    if (amount.isNotEmpty()) {
+                    val amountVal = amount.toDoubleOrNull()
+                    if (amountVal != null) {
+                        val calendar = Calendar.getInstance()
                         onConfirm(Budget(
                             category = selectedCategory,
-                            amount = amount.toDouble(),
-                            month = 1, // Current month logic can be added
-                            year = 2024
+                            subCategory = if (selectedSubCategory == "General") null else selectedSubCategory,
+                            amount = amountVal,
+                            month = calendar.get(Calendar.MONTH) + 1,
+                            year = calendar.get(Calendar.YEAR)
                         ))
                     }
                 },
-                enabled = amount.isNotEmpty()
+                enabled = amount.isNotEmpty() && amount.toDoubleOrNull() != null
             ) {
                 Text("Save")
             }

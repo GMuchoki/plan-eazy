@@ -15,9 +15,11 @@ data class Transaction(
     val date: Long = 0,
     val title: String = "",
     val category: String = "",
+    val subCategory: String? = null,
     val paymentMethodType: String = "",
     val paymentMethodProvider: String = "",
     val note: String = "",
     val type: TransactionType = TransactionType.EXPENSE,
-    val goalId: Long? = null
+    val goalId: Long? = null,
+    val units: Double? = null
 )

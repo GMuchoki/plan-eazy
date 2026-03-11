@@ -137,6 +137,7 @@ fun AddGoalDialog(onDismiss: () -> Unit, onConfirm: (Goal) -> Unit) {
     var title by remember { mutableStateOf("") }
     var targetAmount by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(Constants.DEFAULT_GOAL_TYPES[0]) }
+    var customTypeName by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -149,11 +150,25 @@ fun AddGoalDialog(onDismiss: () -> Unit, onConfirm: (Goal) -> Unit) {
                     label = { Text("Goal Title (e.g., Dream Car)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+                
+                Text("Goal Type", style = MaterialTheme.typography.labelLarge)
                 CategoryDropdown(
                     categories = Constants.DEFAULT_GOAL_TYPES,
                     selectedCategory = selectedType,
                     onCategorySelected = { selectedType = it }
                 )
+
+                // SHOW CUSTOM TYPE BOX IF "CUSTOM" IS SELECTED
+                if (selectedType == "Custom") {
+                    OutlinedTextField(
+                        value = customTypeName,
+                        onValueChange = { customTypeName = it },
+                        label = { Text("Enter Custom Goal Type") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g., Wedding, Gadgets, etc.") }
+                    )
+                }
+
                 OutlinedTextField(
                     value = targetAmount,
                     onValueChange = { if (it.all { char -> char.isDigit() || char == '.' }) targetAmount = it },
@@ -166,9 +181,15 @@ fun AddGoalDialog(onDismiss: () -> Unit, onConfirm: (Goal) -> Unit) {
             Button(
                 onClick = {
                     if (title.isNotEmpty() && targetAmount.isNotEmpty()) {
+                        val finalType = if (selectedType == "Custom" && customTypeName.isNotEmpty()) {
+                            customTypeName
+                        } else {
+                            selectedType
+                        }
+                        
                         onConfirm(Goal(
                             title = title,
-                            type = selectedType,
+                            type = finalType,
                             targetAmount = targetAmount.toDouble(),
                             savedAmount = 0.0
                         ))

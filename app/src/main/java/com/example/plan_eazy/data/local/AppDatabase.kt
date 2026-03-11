@@ -12,7 +12,7 @@ import com.example.plan_eazy.data.model.PaymentMethod
 
 @Database(
     entities = [Transaction::class, Budget::class, Goal::class, PaymentMethod::class],
-    version = 2,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
