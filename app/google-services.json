@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "868787018214",
-    "project_id": "plan-eazy",
-    "storage_bucket": "plan-eazy.firebasestorage.app"
+    "project_number": "812381404470",
+    "project_id": "planeazy-7681f",
+    "storage_bucket": "planeazy-7681f.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:868787018214:android:5d690cef3f364e82f65e27",
+        "mobilesdk_app_id": "1:812381404470:android:f7f8795e0e0eb42842c797",
         "android_client_info": {
-          "package_name": "com.example.plan_eazy"
+          "package_name": "com.nesh.planeazy"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBbULwikGKNwQydkM70y92H6c4u5WgS0Qo"
+          "current_key": "AIzaSyBhg8vh0_4n0WBjXZhLIQYCxr5GRRsB7Rc"
         }
       ],
       "services": {

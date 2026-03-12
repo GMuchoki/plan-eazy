@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.plan_eazy"
+    namespace = "com.nesh.planeazy"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.plan_eazy"
+        applicationId = "com.nesh.planeazy"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -22,7 +22,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -64,6 +64,12 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.analytics)
+
+    // WorkManager
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // Biometric
+    implementation(libs.androidx.biometric)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
