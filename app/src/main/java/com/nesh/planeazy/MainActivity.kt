@@ -27,10 +27,12 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import androidx.work.*
 import com.nesh.planeazy.ui.navigation.Screen
 import com.nesh.planeazy.ui.navigation.bottomNavItems
@@ -47,15 +49,22 @@ import java.util.concurrent.TimeUnit
 class MainActivity : FragmentActivity() {
 
     companion object {
-        private const val NOTIFICATION_PERMISSION_CODE = 1001
+        private const val PERMISSION_REQUEST_CODE = 101
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Handle permissions using legacy request (Safer for FragmentActivity)
-        checkAndRequestNotifications()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), PERMISSION_REQUEST_CODE)
+            } else {
+                scheduleDailyReminder(this)
+            }
+        } else {
+            scheduleDailyReminder(this)
+        }
 
         setContent {
             val authViewModel: AuthViewModel = viewModel()
@@ -63,7 +72,7 @@ class MainActivity : FragmentActivity() {
             val isBiometricAuthenticated by authViewModel.isBiometricAuthenticated.collectAsState()
             val context = LocalContext.current
             val user by authViewModel.user.collectAsState()
-
+            
             PlaneazyTheme(darkTheme = isDarkMode) {
                 if (user != null && !isBiometricAuthenticated && BiometricHelper.isBiometricAvailable(context)) {
                     BiometricLockScreen(
@@ -77,22 +86,9 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun checkAndRequestNotifications() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                // Use the explicit requestPermissions with a low request code (1001)
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_CODE)
-            } else {
-                scheduleDailyReminder(this)
-            }
-        } else {
-            scheduleDailyReminder(this)
-        }
-    }
-
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == NOTIFICATION_PERMISSION_CODE && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+        if (requestCode == PERMISSION_REQUEST_CODE && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             scheduleDailyReminder(this)
         }
     }
@@ -105,8 +101,11 @@ class MainActivity : FragmentActivity() {
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentRoute = navBackStackEntry?.destination?.route
         val user by authViewModel.user.collectAsState()
-        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
         val scope = rememberCoroutineScope()
+        val snackbarHostState = remember { SnackbarHostState() }
+        
+        // Drawer state scoped to the authenticated content
+        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
         LaunchedEffect(user) {
             if (user != null) {
@@ -115,14 +114,84 @@ class MainActivity : FragmentActivity() {
         }
 
         val startDestination = if (user == null) Screen.Login.route else Screen.Home.route
-        val isNavVisible = bottomNavItems.any { it.route == currentRoute } || drawerItems.any { it.route == currentRoute }
+        val isNavVisible = user != null && (bottomNavItems.any { it.route == currentRoute } || drawerItems.any { it.route == currentRoute } || currentRoute?.startsWith("add_transaction") == true)
         val userName = user?.displayName ?: user?.email?.substringBefore("@") ?: "User"
 
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = isNavVisible,
-            drawerContent = {
-                if (isNavVisible) {
+        // Helper to handle navigation and close drawer
+        val onNavigate: (String) -> Unit = { route ->
+            scope.launch { drawerState.close() }
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+
+        val content = @Composable {
+            Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                topBar = {
+                    if (isNavVisible) {
+                        CenterAlignedTopAppBar(
+                            title = { Text(bottomNavItems.find { it.route == currentRoute }?.title ?: drawerItems.find { it.route == currentRoute }?.title ?: "Plan Eazy") },
+                            navigationIcon = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Default.Menu, "Menu")
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { authViewModel.toggleDarkMode(!isDarkMode) }) {
+                                    Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Mode")
+                                }
+                            }
+                        )
+                    }
+                },
+                bottomBar = {
+                    if (isNavVisible) {
+                        NavigationBar {
+                            bottomNavItems.forEach { screen ->
+                                NavigationBarItem(
+                                    icon = { screen.icon?.let { Icon(it, screen.title) } },
+                                    label = { Text(screen.title, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    selected = currentRoute == screen.route,
+                                    onClick = { onNavigate(screen.route) }
+                                )
+                            }
+                        }
+                    }
+                }
+            ) { padding ->
+                NavHost(navController = navController, startDestination = startDestination, modifier = Modifier.padding(padding)) {
+                    composable(Screen.Login.route) { LoginScreen(authViewModel, navController) }
+                    composable(Screen.Signup.route) { SignupScreen(authViewModel, navController) }
+                    composable(Screen.Home.route) { HomeScreen(transactionViewModel, navController, snackbarHostState) }
+                    composable(Screen.Transactions.route) { TransactionsScreen(transactionViewModel, snackbarHostState, navController) }
+                    composable(Screen.Reports.route) { ReportsScreen(transactionViewModel) }
+                    composable(Screen.Goals.route) { GoalsScreen(transactionViewModel) }
+                    composable(Screen.Budget.route) { BudgetScreen(transactionViewModel) }
+                    composable(Screen.Settings.route) { SettingsScreen(transactionViewModel, authViewModel) }
+                    composable(Screen.Profile.route) { ProfileScreen(authViewModel) }
+                    composable(
+                        route = "add_transaction?transactionId={transactionId}",
+                        arguments = listOf(navArgument("transactionId") { 
+                            type = NavType.StringType
+                            nullable = true
+                            defaultValue = null
+                        })
+                    ) { backStackEntry ->
+                        val transactionId = backStackEntry.arguments?.getString("transactionId")?.toLongOrNull()
+                        AddTransactionScreen(transactionViewModel, navController, transactionId, snackbarHostState)
+                    }
+                }
+            }
+        }
+
+        if (isNavVisible) {
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                gesturesEnabled = drawerState.isOpen,
+                drawerContent = {
                     ModalDrawerSheet(
                         drawerContainerColor = Color(0xFF101D3D),
                         drawerContentColor = Color.White,
@@ -135,86 +204,40 @@ class MainActivity : FragmentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        Icons.Default.AccountCircle,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(56.dp),
-                                        tint = Color.White.copy(alpha = 0.9f)
-                                    )
+                                    Icon(Icons.Default.AccountCircle, null, modifier = Modifier.size(56.dp), tint = Color.White.copy(alpha = 0.9f))
                                     Spacer(modifier = Modifier.width(16.dp))
-                                    Text(
-                                        "Hi, ${userName.uppercase()} !",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = Color.White
-                                    )
+                                    Text("Hi, ${userName.uppercase()} !", style = MaterialTheme.typography.titleLarge, color = Color.White)
                                 }
-                                
                                 IconButton(onClick = { authViewModel.toggleDarkMode(!isDarkMode) }) {
-                                    Icon(
-                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = "Toggle Dark Mode",
-                                        tint = Color.White
-                                    )
+                                    Icon(if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode, "Mode", tint = Color.White)
                                 }
                             }
-                            
                             Spacer(modifier = Modifier.height(24.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = { 
-                                        scope.launch { drawerState.close() }
-                                        navController.navigate(Screen.Profile.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { onNavigate(Screen.Profile.route) }, contentPadding = PaddingValues(0.dp)) {
+                                    Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Profile", color = Color.White)
                                 }
-                                
-                                VerticalDivider(
-                                    modifier = Modifier.height(16.dp).padding(horizontal = 12.dp),
-                                    color = Color.White.copy(alpha = 0.3f)
-                                )
-                                
-                                TextButton(
-                                    onClick = { 
-                                        authViewModel.signOut()
-                                        scope.launch { drawerState.close() }
-                                    },
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                VerticalDivider(modifier = Modifier.height(16.dp).padding(horizontal = 12.dp), color = Color.White.copy(alpha = 0.3f) )
+                                TextButton(onClick = { 
+                                    authViewModel.signOut()
+                                    scope.launch { drawerState.close() }
+                                }, contentPadding = PaddingValues(0.dp)) {
+                                    Icon(Icons.AutoMirrored.Filled.Logout, null, tint = Color.White, modifier = Modifier.size(20.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("Logout", color = Color.White)
                                 }
                             }
                         }
-
                         HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
                         Spacer(modifier = Modifier.height(16.dp))
-
                         drawerItems.forEach { item ->
                             NavigationDrawerItem(
-                                icon = { item.icon?.let { Icon(it, contentDescription = null) } },
+                                icon = { item.icon?.let { Icon(it, null) } },
                                 label = { Text(item.title, style = MaterialTheme.typography.bodyLarge) },
                                 selected = currentRoute == item.route,
-                                onClick = {
-                                    scope.launch { drawerState.close() }
-                                    navController.navigate(item.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
+                                onClick = { onNavigate(item.route) },
                                 colors = NavigationDrawerItemDefaults.colors(
                                     unselectedContainerColor = Color.Transparent,
                                     selectedContainerColor = Color.White.copy(alpha = 0.1f),
@@ -228,151 +251,43 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
+            ) {
+                content()
             }
-        ) {
-            Scaffold(
-                topBar = {
-                    if (isNavVisible) {
-                        CenterAlignedTopAppBar(
-                            title = { Text(bottomNavItems.find { it.route == currentRoute }?.title ?: drawerItems.find { it.route == currentRoute }?.title ?: "Plan Eazy") },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Menu")
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { authViewModel.toggleDarkMode(!isDarkMode) }) {
-                                    Icon(
-                                        imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                        contentDescription = "Toggle Dark Mode"
-                                    )
-                                }
-                            }
-                        )
-                    }
-                },
-                bottomBar = {
-                    if (isNavVisible) {
-                        NavigationBar {
-                            bottomNavItems.forEach { screen ->
-                                NavigationBarItem(
-                                    icon = { 
-                                        screen.icon?.let { 
-                                            Icon(it, contentDescription = screen.title) 
-                                        } 
-                                    },
-                                    label = { 
-                                        Text(
-                                            text = screen.title,
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        ) 
-                                    },
-                                    selected = currentRoute == screen.route,
-                                    onClick = {
-                                        navController.navigate(screen.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            ) { innerPadding ->
-                NavHost(
-                    navController = navController,
-                    startDestination = startDestination,
-                    modifier = Modifier.padding(innerPadding)
-                ) {
-                    composable(Screen.Login.route) { LoginScreen(authViewModel, navController) }
-                    composable(Screen.Signup.route) { SignupScreen(authViewModel, navController) }
-                    composable(Screen.Home.route) { HomeScreen(transactionViewModel, navController) }
-                    composable(Screen.Transactions.route) { TransactionsScreen(transactionViewModel) }
-                    composable(Screen.Reports.route) { ReportsScreen(transactionViewModel) }
-                    composable(Screen.Goals.route) { GoalsScreen(transactionViewModel) }
-                    composable(Screen.Budget.route) { BudgetScreen(transactionViewModel) }
-                    composable(Screen.Settings.route) { SettingsScreen(transactionViewModel, authViewModel) }
-                    composable(Screen.Profile.route) { ProfileScreen(authViewModel) }
-                    composable("add_transaction") { AddTransactionScreen(transactionViewModel, navController) }
-                }
-            }
+        } else {
+            content()
         }
     }
 
     private fun scheduleDailyReminder(context: android.content.Context) {
         val reminderRequest = PeriodicWorkRequestBuilder<ReminderWorker>(24, TimeUnit.HOURS)
-            .setInitialDelay(8, TimeUnit.HOURS)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            "daily_reminder",
-            ExistingPeriodicWorkPolicy.KEEP,
-            reminderRequest
-        )
+            .setInitialDelay(8, TimeUnit.HOURS).build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork("daily_reminder", ExistingPeriodicWorkPolicy.KEEP, reminderRequest)
     }
 }
 
 @Composable
 fun BiometricLockScreen(onAuthenticated: () -> Unit, activity: FragmentActivity) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
-
     LaunchedEffect(Unit) {
-        BiometricHelper.showBiometricPrompt(
-            activity = activity,
-            onSuccess = onAuthenticated,
-            onError = { errorMessage = it }
-        )
+        BiometricHelper.showBiometricPrompt(activity = activity, onSuccess = onAuthenticated, onError = { errorMessage = it })
     }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            Icon(
-                imageVector = Icons.Default.Security,
-                contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+            Icon(Icons.Default.Security, null, modifier = Modifier.size(80.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                "App Locked",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Text("App Locked", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Please authenticate to access your financial data.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            
+            Text("Please authenticate to access your financial data.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (errorMessage != null) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(errorMessage!!, color = MaterialTheme.colorScheme.error)
             }
-
             Spacer(modifier = Modifier.height(48.dp))
-            Button(
-                onClick = {
-                    BiometricHelper.showBiometricPrompt(
-                        activity = activity,
-                        onSuccess = onAuthenticated,
-                        onError = { errorMessage = it }
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Fingerprint, contentDescription = null)
+            Button(onClick = {
+                BiometricHelper.showBiometricPrompt(activity = activity, onSuccess = onAuthenticated, onError = { errorMessage = it })
+            }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Fingerprint, null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Unlock with Biometrics")
             }

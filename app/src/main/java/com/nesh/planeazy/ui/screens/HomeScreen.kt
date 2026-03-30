@@ -20,13 +20,20 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.nesh.planeazy.ui.components.TransactionItem
 import com.nesh.planeazy.ui.components.EmptyState
+import com.nesh.planeazy.ui.components.DeleteConfirmationDialog
 import com.nesh.planeazy.ui.viewmodel.TransactionViewModel
 import com.nesh.planeazy.data.model.Goal
+import com.nesh.planeazy.data.model.Transaction
 import com.nesh.planeazy.ui.navigation.Screen
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
-fun HomeScreen(viewModel: TransactionViewModel, navController: NavController) {
+fun HomeScreen(
+    viewModel: TransactionViewModel, 
+    navController: NavController,
+    snackbarHostState: SnackbarHostState
+) {
     val totalIncome by viewModel.totalIncome.collectAsState()
     val totalExpense by viewModel.totalExpense.collectAsState()
     val totalSavings by viewModel.totalSavings.collectAsState()
@@ -35,6 +42,9 @@ fun HomeScreen(viewModel: TransactionViewModel, navController: NavController) {
     
     val balance = totalIncome - totalExpense
     var isBalanceVisible by remember { mutableStateOf(true) }
+    var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
+    
+    val scope = rememberCoroutineScope()
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -114,7 +124,12 @@ fun HomeScreen(viewModel: TransactionViewModel, navController: NavController) {
                 }
             } else {
                 items(allTransactions.take(5)) { transaction ->
-                    TransactionItem(transaction)
+                    TransactionItem(
+                        transaction = transaction,
+                        onClick = { 
+                            navController.navigate("add_transaction?transactionId=${transaction.id}")
+                        }
+                    )
                 }
             }
             
@@ -131,6 +146,29 @@ fun HomeScreen(viewModel: TransactionViewModel, navController: NavController) {
         ) {
             Icon(Icons.Default.Add, contentDescription = "Add Transaction")
         }
+    }
+
+    if (transactionToDelete != null) {
+        DeleteConfirmationDialog(
+            transaction = transactionToDelete!!,
+            onDismiss = { transactionToDelete = null },
+            onConfirm = {
+                val item = transactionToDelete!!
+                viewModel.deleteTransaction(item)
+                transactionToDelete = null
+                
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Transaction deleted",
+                        actionLabel = "Undo",
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.addTransaction(item)
+                    }
+                }
+            }
+        )
     }
 }
 

@@ -1,10 +1,13 @@
 package com.nesh.planeazy.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,11 +18,20 @@ import com.nesh.planeazy.data.model.Constants
 import com.nesh.planeazy.data.model.Transaction
 import com.nesh.planeazy.data.model.TransactionType
 import com.nesh.planeazy.ui.components.CategoryIcons
+import com.nesh.planeazy.ui.components.DeleteConfirmationDialog
 import com.nesh.planeazy.ui.viewmodel.TransactionViewModel
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavController) {
+fun AddTransactionScreen(
+    viewModel: TransactionViewModel, 
+    navController: NavController,
+    transactionId: Long? = null,
+    snackbarHostState: SnackbarHostState
+) {
     var amount by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
@@ -33,7 +45,34 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
     var goalsExpanded by remember { mutableStateOf(false) }
     var units by remember { mutableStateOf("") }
 
+    var selectedDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var currentTransaction by remember { mutableStateOf<Transaction?>(null) }
+    
+    val dateFormatter = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
+    val scope = rememberCoroutineScope()
     val goals by viewModel.allGoals.collectAsState()
+
+    // Fetch transaction if editing
+    LaunchedEffect(transactionId) {
+        if (transactionId != null) {
+            viewModel.getTransactionById(transactionId)?.let { t ->
+                currentTransaction = t
+                amount = t.amount.toString()
+                title = t.title
+                selectedType = t.type
+                selectedCategory = t.category
+                selectedSubCategory = t.subCategory ?: "General"
+                selectedPaymentType = t.paymentMethodType
+                paymentProvider = t.paymentMethodProvider
+                note = t.note
+                selectedGoalId = t.goalId
+                units = t.units?.toString() ?: ""
+                selectedDate = t.date
+            }
+        }
+    }
 
     val categories = when (selectedType) {
         TransactionType.INCOME -> Constants.INCOME_CATEGORIES
@@ -43,23 +82,34 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
 
     LaunchedEffect(selectedType) {
         if (selectedCategory.isEmpty() || !categories.contains(selectedCategory)) {
-            selectedCategory = categories[0]
+            if (transactionId == null) {
+                selectedCategory = categories[0]
+            }
         }
     }
 
     LaunchedEffect(selectedCategory) {
         val subs = Constants.SUB_CATEGORIES[selectedCategory]
-        selectedSubCategory = subs?.firstOrNull() ?: "General"
-        units = "" // Reset units when category changes
+        if (transactionId == null) {
+            selectedSubCategory = subs?.firstOrNull() ?: "General"
+            units = "" 
+        }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add Transaction") },
+                title = { Text(if (transactionId == null) "Add Transaction" else "Edit Transaction") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (transactionId != null) {
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             )
@@ -104,6 +154,43 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                 singleLine = true
             )
 
+            OutlinedTextField(
+                value = dateFormatter.format(Date(selectedDate)),
+                onValueChange = {},
+                label = { Text("Date") },
+                readOnly = true,
+                trailingIcon = {
+                    IconButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.DateRange, contentDescription = "Select Date")
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDatePicker = true }
+            )
+
+            if (showDatePicker) {
+                val datePickerState = rememberDatePickerState(initialSelectedDateMillis = selectedDate)
+                DatePickerDialog(
+                    onDismissRequest = { showDatePicker = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            selectedDate = datePickerState.selectedDateMillis ?: System.currentTimeMillis()
+                            showDatePicker = false
+                        }) {
+                            Text("OK")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDatePicker = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
+            }
+
             Text("Category", style = MaterialTheme.typography.labelLarge)
             CategoryDropdown(
                 categories = categories,
@@ -111,7 +198,6 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                 onCategorySelected = { selectedCategory = it }
             )
 
-            // DYNAMIC SUB-CATEGORY SELECTOR
             val subCategories = Constants.SUB_CATEGORIES[selectedCategory]
             if (subCategories != null) {
                 Text("Sub-category", style = MaterialTheme.typography.labelLarge)
@@ -122,7 +208,6 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                 )
             }
 
-            // DYNAMIC UNITS FIELD BASED ON SUB-CATEGORY
             val unitLabel = Constants.UNIT_MAPPING[selectedSubCategory]
             if (unitLabel != null) {
                 OutlinedTextField(
@@ -139,7 +224,6 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                 )
             }
 
-            // SHOW CUSTOM CATEGORY FIELD IF "CUSTOM" OR "OTHER" IS SELECTED
             if (selectedCategory == "Custom" || selectedCategory == "Other") {
                 OutlinedTextField(
                     value = customCategoryName,
@@ -221,30 +305,55 @@ fun AddTransactionScreen(viewModel: TransactionViewModel, navController: NavCont
                             selectedCategory
                         }
 
-                        viewModel.addTransaction(
-                            Transaction(
-                                amount = amountVal,
-                                title = title,
-                                date = System.currentTimeMillis(),
-                                category = finalCategory,
-                                subCategory = if (selectedSubCategory == "General") null else selectedSubCategory,
-                                paymentMethodType = selectedPaymentType,
-                                paymentMethodProvider = paymentProvider.ifEmpty { "Other" },
-                                note = note,
-                                type = selectedType,
-                                goalId = selectedGoalId,
-                                units = units.toDoubleOrNull()
-                            )
+                        val transaction = Transaction(
+                            id = transactionId ?: 0,
+                            amount = amountVal,
+                            title = title,
+                            date = selectedDate,
+                            category = finalCategory,
+                            subCategory = if (selectedSubCategory == "General") null else selectedSubCategory,
+                            paymentMethodType = selectedPaymentType,
+                            paymentMethodProvider = paymentProvider.ifEmpty { "Other" },
+                            note = note,
+                            type = selectedType,
+                            goalId = selectedGoalId,
+                            units = units.toDoubleOrNull()
                         )
+                        
+                        viewModel.addTransaction(transaction)
                         navController.popBackStack()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = amount.isNotEmpty() && title.isNotEmpty() && amount.toDoubleOrNull() != null
             ) {
-                Text("Save Transaction")
+                Text(if (transactionId == null) "Save Transaction" else "Update Transaction")
             }
         }
+    }
+
+    if (showDeleteDialog && currentTransaction != null) {
+        DeleteConfirmationDialog(
+            transaction = currentTransaction!!,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                val item = currentTransaction!!
+                viewModel.deleteTransaction(item)
+                showDeleteDialog = false
+                navController.popBackStack()
+                
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Transaction deleted",
+                        actionLabel = "Undo",
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.addTransaction(item)
+                    }
+                }
+            }
+        )
     }
 }
 

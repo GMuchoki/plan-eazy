@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -12,20 +13,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import com.nesh.planeazy.data.model.Constants
+import com.nesh.planeazy.data.model.Transaction
 import com.nesh.planeazy.data.model.TransactionType
 import com.nesh.planeazy.ui.components.TransactionItem
 import com.nesh.planeazy.ui.components.EmptyState
+import com.nesh.planeazy.ui.components.DeleteConfirmationDialog
 import com.nesh.planeazy.ui.viewmodel.TransactionViewModel
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TransactionsScreen(viewModel: TransactionViewModel) {
+fun TransactionsScreen(
+    viewModel: TransactionViewModel,
+    snackbarHostState: SnackbarHostState,
+    navController: NavController
+) {
     val allTransactions by viewModel.allTransactions.collectAsState()
     var selectedTypeFilter by remember { mutableStateOf<TransactionType?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var showFilterSheet by remember { mutableStateOf(false) }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
+    var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
+    
+    val scope = rememberCoroutineScope()
     
     val filteredTransactions = allTransactions.filter { 
         (selectedTypeFilter == null || it.type == selectedTypeFilter) &&
@@ -102,33 +114,14 @@ fun TransactionsScreen(viewModel: TransactionViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filteredTransactions) { transaction ->
-                        var showDeleteDialog by remember { mutableStateOf(false) }
-                        
                         TransactionItem(
                             transaction = transaction,
-                            onClick = { showDeleteDialog = true }
+                            onClick = { 
+                                // On click, we could show options or go to edit
+                                // Let's go to edit directly for now as it's a common pattern
+                                navController.navigate("add_transaction?transactionId=${transaction.id}")
+                            }
                         )
-
-                        if (showDeleteDialog) {
-                            AlertDialog(
-                                onDismissRequest = { showDeleteDialog = false },
-                                title = { Text("Delete Transaction") },
-                                text = { Text("Are you sure you want to delete this transaction?") },
-                                confirmButton = {
-                                    TextButton(onClick = {
-                                        viewModel.deleteTransaction(transaction)
-                                        showDeleteDialog = false
-                                    }) {
-                                        Text("Delete", color = MaterialTheme.colorScheme.error)
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showDeleteDialog = false }) {
-                                        Text("Cancel")
-                                    }
-                                }
-                            )
-                        }
                     }
                 }
             }
@@ -147,7 +140,8 @@ fun TransactionsScreen(viewModel: TransactionViewModel) {
                     Text("Filter by Category", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    androidx.compose.foundation.layout.FlowRow(
+                    @OptIn(ExperimentalLayoutApi::class)
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -176,5 +170,28 @@ fun TransactionsScreen(viewModel: TransactionViewModel) {
                 }
             }
         }
+    }
+
+    if (transactionToDelete != null) {
+        DeleteConfirmationDialog(
+            transaction = transactionToDelete!!,
+            onDismiss = { transactionToDelete = null },
+            onConfirm = {
+                val item = transactionToDelete!!
+                viewModel.deleteTransaction(item)
+                transactionToDelete = null
+                
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Transaction deleted",
+                        actionLabel = "Undo",
+                        duration = SnackbarDuration.Short
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        viewModel.addTransaction(item)
+                    }
+                }
+            }
+        )
     }
 }

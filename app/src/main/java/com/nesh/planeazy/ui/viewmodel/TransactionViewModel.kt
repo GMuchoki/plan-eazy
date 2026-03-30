@@ -61,6 +61,10 @@ class TransactionViewModel(application: Application) : AndroidViewModel(applicat
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     }
 
+    suspend fun getTransactionById(id: Long): Transaction? {
+        return repository.getTransactionById(id)
+    }
+
     fun addTransaction(transaction: Transaction) {
         viewModelScope.launch {
             try {

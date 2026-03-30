@@ -17,6 +17,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions")
     suspend fun getAllTransactionsSync(): List<Transaction>
 
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    suspend fun getTransactionById(id: Long): Transaction?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTransaction(transaction: Transaction)
 
