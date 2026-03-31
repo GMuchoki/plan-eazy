@@ -56,6 +56,7 @@ object Constants {
         "Business",
         "Freelance",
         "Investment",
+        "Loan",
         "Gift",
         "Other"
     )

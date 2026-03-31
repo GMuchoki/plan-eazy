@@ -27,6 +27,7 @@ object CategoryIcons {
             "Salary" -> Icons.Default.Payments
             "Freelance" -> Icons.Default.LaptopMac
             "Investment" -> Icons.AutoMirrored.Filled.TrendingUp
+            "Loan" -> Icons.Default.RequestQuote
             "Gift" -> Icons.Default.Redeem
             
             // Sub Categories
