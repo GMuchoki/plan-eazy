@@ -1,6 +1,7 @@
 package com.nesh.planeazy.data.local
 
 import androidx.room.TypeConverter
+import com.nesh.planeazy.data.model.DebtType
 import com.nesh.planeazy.data.model.TransactionType
 
 class Converters {
@@ -12,5 +13,15 @@ class Converters {
     @TypeConverter
     fun toTransactionType(value: String): TransactionType {
         return TransactionType.valueOf(value)
+    }
+
+    @TypeConverter
+    fun fromDebtType(value: DebtType): String {
+        return value.name
+    }
+
+    @TypeConverter
+    fun toDebtType(value: String): DebtType {
+        return DebtType.valueOf(value)
     }
 }

@@ -1,5 +1,6 @@
 package com.nesh.planeazy.ui.screens
 
+import androidx.biometric.BiometricManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,11 +31,16 @@ fun SettingsScreen(
 ) {
     val isDarkMode by authViewModel.isDarkMode.collectAsState()
     val currency by authViewModel.currency.collectAsState()
+    val useBiometrics by authViewModel.useBiometrics.collectAsState()
+    
     var showResetDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    
     val user by authViewModel.user.collectAsState()
     val allTransactions by transactionViewModel.allTransactions.collectAsState()
+    val allDebts by transactionViewModel.allDebts.collectAsState()
     val isSyncing by transactionViewModel.isSyncing.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -86,6 +92,8 @@ fun SettingsScreen(
                 }
             }
 
+            // General Section
+            SettingsSectionHeader("General")
             SettingsItem(
                 icon = Icons.Default.Payments,
                 title = "Currency",
@@ -106,18 +114,41 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            // Cloud Sync Actions
-            Text(
-                "Cloud Sync",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary
+            // Security Section
+            SettingsSectionHeader("Security")
+            SettingsItem(
+                icon = Icons.Default.Fingerprint,
+                title = "Biometric Lock",
+                subtitle = "Require fingerprint to open app",
+                trailing = {
+                    Switch(
+                        checked = useBiometrics,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                val biometricManager = BiometricManager.from(context)
+                                if (biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS) {
+                                    authViewModel.setUseBiometrics(true)
+                                } else {
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Biometrics not available on this device")
+                                    }
+                                }
+                            } else {
+                                authViewModel.setUseBiometrics(false)
+                            }
+                        }
+                    )
+                }
             )
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // Cloud Sync Section
+            SettingsSectionHeader("Cloud Sync")
             SettingsItem(
-                icon = if (isSyncing) Icons.Default.Sync else Icons.Default.CloudUpload,
-                title = "Backup to Cloud",
-                subtitle = if (isSyncing) "Uploading..." else "Save data to your account",
+                icon = if (isSyncing) Icons.Default.Sync else Icons.Default.CloudSync,
+                title = "Force Full Re-Sync",
+                subtitle = if (isSyncing) "Syncing..." else "Ensure all local data is in the cloud",
                 onClick = {
                     transactionViewModel.syncToCloud()
                 }
@@ -126,7 +157,7 @@ fun SettingsScreen(
             SettingsItem(
                 icon = if (isSyncing) Icons.Default.Sync else Icons.Default.CloudDownload,
                 title = "Restore from Cloud",
-                subtitle = "Recover data from your account",
+                subtitle = "Recover your data on this device",
                 onClick = {
                     transactionViewModel.restoreFromCloud()
                 }
@@ -134,44 +165,59 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-            SettingsItem(
-                icon = Icons.Default.Info,
-                title = "Seed Sample Data",
-                subtitle = "Fill app with test data",
-                onClick = {
-                    transactionViewModel.seedSampleData()
-                    scope.launch {
-                        snackbarHostState.showSnackbar("Sample data added!")
-                    }
-                }
-            )
-
+            // Data Section
+            SettingsSectionHeader("Data & Backup")
             SettingsItem(
                 icon = Icons.Default.FileUpload,
                 title = "Export Data",
-                subtitle = "CSV, EXCEL (CSV)",
+                subtitle = "Save as CSV, Excel or PDF",
                 onClick = { showExportDialog = true }
             )
 
             SettingsItem(
-                icon = Icons.Default.DeleteForever,
-                title = "Reset Data",
-                subtitle = "Wipe all local data",
-                titleColor = MaterialTheme.colorScheme.error,
-                onClick = { showResetDialog = true }
+                icon = Icons.Default.Info,
+                title = "Seed Sample Data",
+                subtitle = "Fill app with test transactions",
+                onClick = {
+                    transactionViewModel.seedSampleData(
+                        onFailure = { error ->
+                            scope.launch {
+                                snackbarHostState.showSnackbar(error)
+                            }
+                        }
+                    )
+                }
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+            // Danger Zone
+            SettingsSectionHeader("Danger Zone", color = MaterialTheme.colorScheme.error)
+            SettingsItem(
+                icon = Icons.Default.DeleteForever,
+                title = "Reset Local Data",
+                subtitle = "Wipe all transactions on this device",
+                titleColor = MaterialTheme.colorScheme.error,
+                onClick = { showResetDialog = true }
+            )
+
             SettingsItem(
                 icon = Icons.AutoMirrored.Filled.Logout,
                 title = "Logout",
-                subtitle = "Clears local cache and signs out",
+                subtitle = "Sign out and clear local cache",
                 titleColor = MaterialTheme.colorScheme.error,
                 onClick = {
                     transactionViewModel.resetAllData()
                     authViewModel.signOut()
                 }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.PersonOff,
+                title = "Delete Account",
+                subtitle = "Permanently remove all data from cloud",
+                titleColor = MaterialTheme.colorScheme.error,
+                onClick = { showDeleteAccountDialog = true }
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -186,28 +232,69 @@ fun SettingsScreen(
             )
         }
 
+        // Dialogs
         if (showExportDialog) {
             AlertDialog(
                 onDismissRequest = { showExportDialog = false },
-                title = { Text("Export Transactions") },
-                text = { Text("Choose a format to export your transaction history.") },
-                confirmButton = {
-                    Row {
-                        TextButton(onClick = {
-                            ExportHelper.exportToCSV(context, allTransactions)
-                            showExportDialog = false
-                        }) {
-                            Text("CSV")
+                title = { Text("Export Reports") },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("Choose what you want to export.", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Button(
+                            onClick = {
+                                ExportHelper.exportToPDF(context, allTransactions, currency)
+                                showExportDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Transactions (PDF)")
                         }
-                        TextButton(onClick = {
-                            ExportHelper.exportToExcelFriendly(context, allTransactions)
-                            showExportDialog = false
-                        }) {
-                            Text("EXCEL")
+                        
+                        Button(
+                            onClick = {
+                                ExportHelper.exportDebtsPDF(context, allDebts, currency)
+                                showExportDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Debts & Loans (PDF)")
+                        }
+                        
+                        Button(
+                            onClick = {
+                                ExportHelper.exportToExcelFriendly(context, allTransactions)
+                                showExportDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.TableChart, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Export to Excel")
+                        }
+                        
+                        OutlinedButton(
+                            onClick = {
+                                ExportHelper.exportToCSV(context, allTransactions)
+                                showExportDialog = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Description, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Transactions (CSV)")
                         }
                     }
                 },
-                dismissButton = {
+                confirmButton = {
                     TextButton(onClick = { showExportDialog = false }) {
                         Text("Cancel")
                     }
@@ -256,17 +343,17 @@ fun SettingsScreen(
         if (showResetDialog) {
             AlertDialog(
                 onDismissRequest = { showResetDialog = false },
-                title = { Text("Reset All Data?") },
-                text = { Text("This will permanently delete all local transactions and budgets.") },
+                title = { Text("Reset Local Data?") },
+                text = { Text("This will permanently delete all local transactions and budgets on this device. Cloud data remains safe.") },
                 confirmButton = {
                     TextButton(onClick = {
                         transactionViewModel.resetAllData()
                         showResetDialog = false
                         scope.launch {
-                            snackbarHostState.showSnackbar("All data cleared")
+                            snackbarHostState.showSnackbar("Local data cleared")
                         }
                     }) {
-                        Text("Reset Everything", color = MaterialTheme.colorScheme.error)
+                        Text("Reset Local", color = MaterialTheme.colorScheme.error)
                     }
                 },
                 dismissButton = {
@@ -276,7 +363,43 @@ fun SettingsScreen(
                 }
             )
         }
+
+        if (showDeleteAccountDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteAccountDialog = false },
+                title = { Text("Delete Account Permanently?") },
+                text = { Text("This action cannot be undone. All your cloud data and transactions will be deleted forever.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        authViewModel.deleteAccount { success ->
+                            if (success) {
+                                transactionViewModel.resetAllData()
+                                showDeleteAccountDialog = false
+                            }
+                        }
+                    }) {
+                        Text("Delete Everything", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteAccountDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
     }
+}
+
+@Composable
+fun SettingsSectionHeader(text: String, color: Color = MaterialTheme.colorScheme.primary) {
+    Text(
+        text = text,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = color,
+        fontWeight = FontWeight.Bold
+    )
 }
 
 @Composable

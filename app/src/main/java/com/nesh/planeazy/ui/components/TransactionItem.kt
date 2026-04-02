@@ -1,9 +1,12 @@
 package com.nesh.planeazy.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -23,6 +26,8 @@ import java.util.*
 @Composable
 fun TransactionItem(
     transaction: Transaction,
+    currency: String = "KES",
+    isSelected: Boolean = false,
     onClick: () -> Unit = {},
     onLongClick: () -> Unit = {}
 ) {
@@ -42,11 +47,18 @@ fun TransactionItem(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clip(MaterialTheme.shapes.medium)
+            .then(
+                if (isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, MaterialTheme.shapes.medium)
+                else Modifier
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f) 
+                             else MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier
@@ -95,17 +107,27 @@ fun TransactionItem(
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                val amountPrefix = when(transaction.type) {
-                    TransactionType.INCOME -> "+"
-                    TransactionType.EXPENSE -> "-"
-                    TransactionType.SAVINGS -> "→"
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp).padding(end = 4.dp)
+                        )
+                    }
+                    val amountPrefix = when(transaction.type) {
+                        TransactionType.INCOME -> "+"
+                        TransactionType.EXPENSE -> "-"
+                        TransactionType.SAVINGS -> "→"
+                    }
+                    Text(
+                        text = "$amountPrefix $currency ${String.format(Locale.getDefault(), "%,.2f", transaction.amount)}",
+                        fontWeight = FontWeight.Bold,
+                        color = color,
+                        fontSize = 16.sp
+                    )
                 }
-                Text(
-                    text = "$amountPrefix KES ${String.format("%.2f", transaction.amount)}",
-                    fontWeight = FontWeight.Bold,
-                    color = color,
-                    fontSize = 16.sp
-                )
                 Text(
                     text = dateString,
                     fontSize = 12.sp,

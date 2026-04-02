@@ -1,12 +1,16 @@
 package com.nesh.planeazy.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
@@ -18,9 +22,16 @@ import com.nesh.planeazy.ui.viewmodel.AuthViewModel
 fun LoginScreen(viewModel: AuthViewModel, navController: NavController) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val user by viewModel.user.collectAsState()
+
+    // Clear error when entering screen
+    LaunchedEffect(Unit) {
+        viewModel.clearError()
+    }
 
     LaunchedEffect(user) {
         if (user != null) {
@@ -55,7 +66,7 @@ fun LoginScreen(viewModel: AuthViewModel, navController: NavController) {
 
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = { email = it.trim() },
                 label = { Text("Email") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -68,7 +79,15 @@ fun LoginScreen(viewModel: AuthViewModel, navController: NavController) {
                 onValueChange = { password = it },
                 label = { Text("Password") },
                 modifier = Modifier.fillMaxWidth(),
-                visualTransformation = PasswordVisualTransformation(),
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
+                    val description = if (passwordVisible) "Hide password" else "Show password"
+
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(imageVector = image, contentDescription = description)
+                    }
+                },
                 singleLine = true
             )
 
@@ -76,11 +95,28 @@ fun LoginScreen(viewModel: AuthViewModel, navController: NavController) {
                 Text(
                     text = error!!,
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier.padding(top = 8.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = { 
+                        viewModel.clearError()
+                        navController.navigate(Screen.ForgotPassword.route) 
+                    }
+                ) {
+                    Text("Forgot Password?")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = { viewModel.signIn(email, password) },
@@ -99,7 +135,10 @@ fun LoginScreen(viewModel: AuthViewModel, navController: NavController) {
             }
 
             TextButton(
-                onClick = { navController.navigate(Screen.Signup.route) }
+                onClick = { 
+                    viewModel.clearError()
+                    navController.navigate(Screen.Signup.route) 
+                }
             ) {
                 Text("Don't have an account? Sign Up")
             }

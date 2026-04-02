@@ -45,7 +45,6 @@ fun PlaneazyTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // We keep the icon color logic but allow the edge-to-edge system to handle the background
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }

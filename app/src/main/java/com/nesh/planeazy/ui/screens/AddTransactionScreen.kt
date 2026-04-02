@@ -1,25 +1,37 @@
 package com.nesh.planeazy.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.nesh.planeazy.data.model.Constants
 import com.nesh.planeazy.data.model.Transaction
 import com.nesh.planeazy.data.model.TransactionType
 import com.nesh.planeazy.ui.components.CategoryIcons
 import com.nesh.planeazy.ui.components.DeleteConfirmationDialog
 import com.nesh.planeazy.ui.viewmodel.TransactionViewModel
+import com.nesh.planeazy.util.TransactionUtils
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,20 +42,27 @@ fun AddTransactionScreen(
     viewModel: TransactionViewModel, 
     navController: NavController,
     transactionId: Long? = null,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    initialGoalId: Long? = null,
+    currency: String = "KES"
 ) {
     var amount by remember { mutableStateOf("") }
     var title by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
+    var selectedType by remember { mutableStateOf(if (initialGoalId != null) TransactionType.SAVINGS else TransactionType.EXPENSE) }
     var selectedCategory by remember { mutableStateOf("") }
     var selectedSubCategory by remember { mutableStateOf("General") }
     var customCategoryName by remember { mutableStateOf("") }
     var selectedPaymentType by remember { mutableStateOf(Constants.PAYMENT_METHOD_TYPES[0]) }
     var paymentProvider by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    var selectedGoalId by remember { mutableStateOf<Long?>(null) }
+    var selectedGoalId by remember { mutableStateOf<Long?>(initialGoalId) }
     var goalsExpanded by remember { mutableStateOf(false) }
     var units by remember { mutableStateOf("") }
+    
+    // Recurring & Attachment fields
+    var isRecurring by remember { mutableStateOf(false) }
+    var frequency by remember { mutableStateOf("Monthly") }
+    var attachmentUri by remember { mutableStateOf<Uri?>(null) }
 
     var selectedDate by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -53,11 +72,18 @@ fun AddTransactionScreen(
     val dateFormatter = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
     val scope = rememberCoroutineScope()
     val goals by viewModel.allGoals.collectAsState()
+    val userCategories by viewModel.allUserCategories.collectAsState()
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        attachmentUri = uri
+    }
 
     // Fetch transaction if editing
     LaunchedEffect(transactionId) {
-        if (transactionId != null) {
-            viewModel.getTransactionById(transactionId)?.let { t ->
+        transactionId?.let { id ->
+            viewModel.getTransactionById(id)?.let { t ->
                 currentTransaction = t
                 amount = t.amount.toString()
                 title = t.title
@@ -70,28 +96,47 @@ fun AddTransactionScreen(
                 selectedGoalId = t.goalId
                 units = t.units?.toString() ?: ""
                 selectedDate = t.date
+                isRecurring = t.isRecurring
+                frequency = t.frequency ?: "Monthly"
+                attachmentUri = t.attachmentUri?.let { Uri.parse(it) }
             }
         }
     }
 
-    val categories = when (selectedType) {
-        TransactionType.INCOME -> Constants.INCOME_CATEGORIES
-        TransactionType.EXPENSE -> Constants.EXPENSE_CATEGORIES
-        TransactionType.SAVINGS -> Constants.DEFAULT_GOAL_TYPES
+    val categories = remember(selectedType, userCategories) {
+        val base = when (selectedType) {
+            TransactionType.INCOME -> Constants.INCOME_CATEGORIES
+            TransactionType.EXPENSE -> Constants.EXPENSE_CATEGORIES
+            TransactionType.SAVINGS -> Constants.DEFAULT_GOAL_TYPES
+        }
+        val custom = userCategories
+            .filter { it.type == selectedType && it.parentCategory == null }
+            .map { it.name }
+        (base + custom).distinct()
     }
 
     LaunchedEffect(selectedType) {
         if (selectedCategory.isEmpty() || !categories.contains(selectedCategory)) {
             if (transactionId == null) {
-                selectedCategory = categories[0]
+                val targetCat = if (initialGoalId != null && selectedType == TransactionType.SAVINGS) {
+                    goals.find { it.id == initialGoalId }?.type ?: categories[0]
+                } else {
+                    categories[0]
+                }
+                selectedCategory = if (categories.contains(targetCat)) targetCat else categories[0]
             }
         }
     }
 
     LaunchedEffect(selectedCategory) {
-        val subs = Constants.SUB_CATEGORIES[selectedCategory]
+        val baseSubs = Constants.SUB_CATEGORIES[selectedCategory] ?: emptyList()
+        val customSubs = userCategories
+            .filter { it.parentCategory == selectedCategory }
+            .map { it.name }
+        val subs = (baseSubs + customSubs).distinct()
+
         if (transactionId == null) {
-            selectedSubCategory = subs?.firstOrNull() ?: "General"
+            selectedSubCategory = if (subs.isNotEmpty()) subs.first() else "General"
             units = "" 
         }
     }
@@ -102,7 +147,7 @@ fun AddTransactionScreen(
                 title = { Text(if (transactionId == null) "Add Transaction" else "Edit Transaction") },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -141,7 +186,7 @@ fun AddTransactionScreen(
                         amount = input
                     }
                 },
-                label = { Text("Amount") },
+                label = { Text("Amount ($currency)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -149,7 +194,7 @@ fun AddTransactionScreen(
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title / Source (e.g., Monthly Rent)") },
+                label = { Text("Title") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -180,15 +225,24 @@ fun AddTransactionScreen(
                         }) {
                             Text("OK")
                         }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showDatePicker = false }) {
-                            Text("Cancel")
-                        }
                     }
                 ) {
                     DatePicker(state = datePickerState)
                 }
+            }
+
+            // Recurring Options
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = isRecurring, onCheckedChange = { isRecurring = it })
+                Text("Recurring Transaction")
+            }
+
+            if (isRecurring) {
+                CategoryDropdown(
+                    categories = listOf("Daily", "Weekly", "Monthly", "Yearly"),
+                    selectedCategory = frequency,
+                    onCategorySelected = { frequency = it }
+                )
             }
 
             Text("Category", style = MaterialTheme.typography.labelLarge)
@@ -198,8 +252,13 @@ fun AddTransactionScreen(
                 onCategorySelected = { selectedCategory = it }
             )
 
-            val subCategories = Constants.SUB_CATEGORIES[selectedCategory]
-            if (subCategories != null) {
+            val baseSubs = Constants.SUB_CATEGORIES[selectedCategory] ?: emptyList()
+            val customSubs = userCategories
+                .filter { it.parentCategory == selectedCategory }
+                .map { it.name }
+            val subCategories = (baseSubs + customSubs).distinct()
+
+            if (subCategories.isNotEmpty()) {
                 Text("Sub-category", style = MaterialTheme.typography.labelLarge)
                 CategoryDropdown(
                     categories = subCategories,
@@ -208,81 +267,36 @@ fun AddTransactionScreen(
                 )
             }
 
-            val unitLabel = Constants.UNIT_MAPPING[selectedSubCategory]
-            if (unitLabel != null) {
-                OutlinedTextField(
-                    value = units,
-                    onValueChange = { input ->
-                        if (input.isEmpty() || (input.all { char -> char.isDigit() || char == '.' } && input.count { it == '.' } <= 1)) {
-                            units = input
-                        }
-                    },
-                    label = { Text("Units used ($unitLabel)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text("e.g., 12.5") }
-                )
-            }
-
-            if (selectedCategory == "Custom" || selectedCategory == "Other") {
-                OutlinedTextField(
-                    value = customCategoryName,
-                    onValueChange = { customCategoryName = it },
-                    label = { Text("Enter Category Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    placeholder = { Text("e.g., Crypto, Charity, Side Hustle") }
-                )
-            }
-
-            Text("Payment Method Type", style = MaterialTheme.typography.labelLarge)
-            CategoryDropdown(
-                categories = Constants.PAYMENT_METHOD_TYPES,
-                selectedCategory = selectedPaymentType,
-                onCategorySelected = { selectedPaymentType = it }
-            )
-
-            OutlinedTextField(
-                value = paymentProvider,
-                onValueChange = { paymentProvider = it },
-                label = { Text("Provider (e.g., M-Pesa, Equity, Cash)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            if (selectedType == TransactionType.SAVINGS) {
-                Text("Link to Goal (Optional)", style = MaterialTheme.typography.labelLarge)
-                ExposedDropdownMenuBox(
-                    expanded = goalsExpanded,
-                    onExpandedChange = { goalsExpanded = !goalsExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = goals.find { it.id == selectedGoalId }?.title ?: "No goal linked",
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = goalsExpanded) },
-                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryEditable, true).fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = goalsExpanded,
-                        onDismissRequest = { goalsExpanded = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("None") },
-                            onClick = {
-                                selectedGoalId = null
-                                goalsExpanded = false
-                            }
+            // Attachment Section
+            Text("Attachment", style = MaterialTheme.typography.labelLarge)
+            Card(
+                modifier = Modifier.fillMaxWidth().height(150.dp).clickable { launcher.launch("image/*") },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                if (attachmentUri != null) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        AsyncImage(
+                            model = attachmentUri,
+                            contentDescription = "Receipt Attachment",
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop
                         )
-                        goals.forEach { goal ->
-                            DropdownMenuItem(
-                                text = { Text(goal.title) },
-                                onClick = {
-                                    selectedGoalId = goal.id
-                                    goalsExpanded = false
-                                }
-                            )
+                        IconButton(
+                            onClick = { attachmentUri = null },
+                            modifier = Modifier.align(Alignment.TopEnd).background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White)
                         }
+                    }
+                } else {
+                    val context = LocalContext.current
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(48.dp))
+                        Text("Add Receipt Photo", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -317,7 +331,12 @@ fun AddTransactionScreen(
                             note = note,
                             type = selectedType,
                             goalId = selectedGoalId,
-                            units = units.toDoubleOrNull()
+                            units = units.toDoubleOrNull(),
+                            isRecurring = isRecurring,
+                            frequency = if (isRecurring) frequency else null,
+                            nextOccurrence = if (isRecurring) TransactionUtils.calculateNextOccurrence(selectedDate, frequency) else null,
+                            isTemplate = isRecurring && transactionId == null,
+                            attachmentUri = attachmentUri?.toString()
                         )
                         
                         viewModel.addTransaction(transaction)
@@ -374,16 +393,10 @@ fun CategoryDropdown(
             value = selectedCategory,
             onValueChange = {},
             readOnly = true,
-            leadingIcon = {
-                Icon(
-                    imageVector = CategoryIcons.getIcon(selectedCategory),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-            },
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth(),
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
         )
         ExposedDropdownMenu(
             expanded = expanded,
@@ -393,13 +406,10 @@ fun CategoryDropdown(
                 DropdownMenuItem(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = CategoryIcons.getIcon(category),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
+                            CategoryIcons.getIcon(category).let {
+                                Icon(it, contentDescription = null, modifier = Modifier.size(24.dp))
+                                Spacer(Modifier.width(8.dp))
+                            }
                             Text(category)
                         }
                     },
